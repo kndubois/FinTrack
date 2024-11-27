@@ -41,42 +41,70 @@ def currency_menu(cnxn):
         print("-" * 35)
 
         if choice == "1":
-            amount_input = input("\nEnter the amount in CAD: $").strip()
 
-            if amount_input.replace('.', '', 1).isdigit():
+            while True:
 
-                amount = Decimal(amount_input)
+                amount_input = input(f"\nEnter the amount in {BASE_CURRENCY}: $").strip()
+
+                if amount_input.replace('.', '', 1).isdigit():
+                    amount = Decimal(amount_input)
+                    break
+                else:
+                    subject.notify(Notifications.invalid_input())
+                    continue
+
+            while True:
+
                 chosen_currency = input("Enter currency (e.g., CAD, USD, EUR): ").strip().upper()
                 exchange_rate = get_exchange_rate(cursor, chosen_currency)
-                
+                    
                 # Perform the conversion
-                if exchange_rate and exchange_rate != Decimal("1.0"):
+                if exchange_rate:
                     converted_amount = amount * exchange_rate
                     print(f"\nAPI exchange rate ({BASE_CURRENCY} to {chosen_currency}): {exchange_rate:.4f}")
                     print(f"Converted Amount: ${converted_amount:,.2f} {chosen_currency}")
+                    break
 
                 elif chosen_currency == BASE_CURRENCY:
                     print(f"\nAmount remains unchanged in {BASE_CURRENCY}: ${amount:,.2f} {BASE_CURRENCY}")
-                
+                    break
+                    
                 else:
-                    subject.notify(Notifications.exchange_rate_not_found())
-            else:
-                subject.notify(Notifications.invalid_input())
+                    subject.notify(Notifications.exchange_rate_not_found(chosen_currency))
+                    continue
 
         elif choice == "2":
-        
-            amount_input = input("\nEnter the amount in CAD: $").strip()
 
-            # Validate the amount input
-            if amount_input.replace('.', '', 1).isdigit():
-                amount = Decimal(amount_input)
+            while True:
+                amount_input = input("\nEnter the amount in CAD: $").strip()
+
+                # Validate the amount input
+                if amount_input.replace('.', '', 1).isdigit():
+                    amount = Decimal(amount_input)
+                    break
+                else:
+                    subject.notify(Notifications.invalid_input())
+                    continue
+
+            while True:
                 chosen_currency = input("Enter currency (e.g., CAD, USD, EUR): ").strip().upper()
+                if chosen_currency in exchange_rates_cache["rates"]:
+                    break  # Valid currency found
+                else:
+                    subject.notify(Notifications.exchange_rate_not_found(chosen_currency))
+                    continue
+
+            while True:        
                 custom_rate_input = input(f"Enter your custom exchange rate for {BASE_CURRENCY} to {chosen_currency}: ").strip()
 
-                # Call the updated custom exchange rate function
-                set_custom_exchange_rate(cursor, amount, chosen_currency, custom_rate_input)
-            else:
-                subject.notify(Notifications.invalid_input())
+                if custom_rate_input.replace('.', '', 1).isdigit():
+                    break
+                else:
+                    subject.notify(Notifications.invalid_currency_rate())
+                    continue
+
+            # Call the updated custom exchange rate function
+            set_custom_exchange_rate(cursor, amount, chosen_currency, custom_rate_input)
 
         elif choice == "3":
             subject.notify(Notifications.returning_to_main_menu())
@@ -95,12 +123,14 @@ def fetch_and_cache_exchange_rates():
     if response.status_code == 200:
         data = response.json()
         exchange_rates = {k: Decimal(str(v)) for k, v in data.get("rates", {}).items()}
-        last_updated = datetime.now()
+
+        # Add the base currency to the exchange rates
+        exchange_rates[BASE_CURRENCY] = Decimal("1.0")
 
         # Update the cache
         exchange_rates_cache["rates"] = exchange_rates
-        exchange_rates_cache["last_updated"] = last_updated
-
+        exchange_rates_cache["last_updated"] = datetime.now()
+        
         return exchange_rates
     else:
         subject.notify(Notifications.exchange_rate_not_found(BASE_CURRENCY))
@@ -108,27 +138,33 @@ def fetch_and_cache_exchange_rates():
 
 #Fetch the exchange rate for the specified currency. Cache and store rates in the database.
 def get_exchange_rate(cursor, chosen_currency):
+    refresh_exchange_rates_cache()
 
-    # Check if the rate exists in cache
-    if exchange_rates_cache["rates"] and (
-        datetime.now() - exchange_rates_cache["last_updated"] <= timedelta(hours=24)
+    if chosen_currency == BASE_CURRENCY:
+        return Decimal("1.0")
+
+    # Check the cache for the exchange rate
+    return exchange_rates_cache["rates"].get(chosen_currency)
+
+
+# Get the exchange rate from the database
+def get_supported_currencies():
+
+    # Returns a set of supported currency codes from the cache.
+    refresh_exchange_rates_cache() 
+
+    # Return the keys (currency codes) from the cached rates
+    return set(exchange_rates_cache["rates"].keys())
+
+
+# Refresh the exchange rates cache if it's empty or outdated
+def refresh_exchange_rates_cache():
+
+    # Refresh the cache if it's empty or outdated
+    if not exchange_rates_cache["rates"] or (
+        datetime.now() - exchange_rates_cache["last_updated"] > timedelta(hours=24)
     ):
-        return exchange_rates_cache["rates"].get(chosen_currency)
-
-    # If not in cache, fetch all rates from API and update cache
-    exchange_rates = fetch_and_cache_exchange_rates()
-    
-    # If the API call is successful, update the database with the new rates
-    if exchange_rates:
-        rate = exchange_rates.get(chosen_currency)
-        if rate:
-            last_updated = exchange_rates_cache["last_updated"]
-            update_exchange_rate(cursor, BASE_CURRENCY, chosen_currency, rate, last_updated)
-            return rate
-
-    # Fallback to database if API fails
-    print(f"API unavailable, checking database for {chosen_currency} rate...")
-    return get_exchange_rate_from_db(cursor, BASE_CURRENCY, chosen_currency) or Decimal("1.0")
+        fetch_and_cache_exchange_rates()
 
 
 # Converts an amount from the base currency (CAD) to the chosen currency.
@@ -146,23 +182,31 @@ def currency_conversion(cursor, amount, chosen_currency):
 # Validates the user's chosen currency
 
 def validate_currency(cursor):
-
     while True:
-        chosen_currency = input("\n" + "Enter currency (e.g., CAD, USD, EUR): ").strip().upper()
+        # Fetch supported currencies
+        supported_currencies = get_supported_currencies()
+
+        chosen_currency = input("\nEnter currency (e.g., CAD, USD, EUR): ").strip().upper()
+
         if chosen_currency.isalpha():
             # Check if the currency is supported
-            exchange_rate = get_exchange_rate(cursor, chosen_currency)
-            # If the currency is supported, return it
-            if exchange_rate != Decimal("1.0") or chosen_currency == BASE_CURRENCY:
-                return chosen_currency
+            if chosen_currency in supported_currencies:
+                # Fetch the exchange rate for validation
+                exchange_rate = get_exchange_rate(cursor, chosen_currency)
+                if exchange_rate:
+                    return chosen_currency
+                else:
+                    subject.notify(Notifications.exchange_rate_not_found(chosen_currency))
             else:
-                subject.notify(Notifications.exchange_rate_not_found())
+                subject.notify(Notifications.exchange_rate_not_found(chosen_currency))
         else:
             subject.notify(Notifications.invalid_currency())
+
 
 # Adjust custom exchange rate realistically based on actual exchange rates.
 
 def set_custom_exchange_rate(cursor, amount, chosen_currency, custom_rate_input):
+
     # Validate the chosen currency and custom rate
     if not chosen_currency.isalpha():
         subject.notify(Notifications.invalid_currency())
@@ -179,6 +223,15 @@ def set_custom_exchange_rate(cursor, amount, chosen_currency, custom_rate_input)
 
     # Get the actual exchange rate and adjust the custom rate
     actual_rate = get_exchange_rate(cursor, chosen_currency)
+    if actual_rate is None:
+        subject.notify(Notifications.exchange_rate_not_found())
+        return None
+
+    # If the custom rate or actual rate is 0, notify the user
+    if custom_rate == 0 or actual_rate == 0:
+        subject.notify(Notifications.exchange_rate_greater())
+        return None
+
     adjusted_custom_rate = actual_rate / custom_rate
     # Perform the conversion
     converted_amount = Decimal(amount) * adjusted_custom_rate

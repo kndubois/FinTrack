@@ -143,7 +143,7 @@ class Notifications:
     
     @staticmethod
     def invalid_input():
-        return {"text": "ERROR: Invalid input. Please enter a numeric value.", "contexts": ["general"]}
+        return {"text": "\nERROR: Invalid input. Please enter a numeric value.", "contexts": ["general"]}
     
     @staticmethod
     def invalid_choice():
@@ -433,19 +433,17 @@ class Notifications:
     
     @staticmethod
     def invalid_currency_rate():
-        return {"text": "ERROR: Invalid currency rate input. Please enter a numeric value.", "contexts": ["currency"]}
+        return {"text": "\nERROR: Invalid currency rate input. Please enter a numeric value.\n", "contexts": ["currency"]}
     
     @staticmethod
     def conversion_failed():
         return {"text": "ERROR: Conversion failed. Please check the currency code.", "contexts": ["currency"]}
-    
-    @staticmethod
-    def custom_rate():
-        return {"text": "ERROR: Invalid currency rate input. Please enter a numeric value.", "contexts": ["currency"]}
-    
+
+
     @staticmethod
     def exchange_rate_not_found(chosen_currency):
-        return f"\nERROR: Exchange rate not found for {chosen_currency}."
+        return {"text": f"\nERROR: Exchange rate for '{chosen_currency}' not found. Please enter a valid currency.\n", "contexts": ["currency"]}
+
     
     '''
     @staticmethod
